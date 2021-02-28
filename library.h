@@ -20,6 +20,8 @@ void set_final_base_angular_position(int session, double x, double y, double z);
 void set_final_base_angular_velocity(int session, double x, double y, double z);
 
 void set_initial_end_effector_position(int session, int id, double x, double y);
+
+void start_optimization(int session);
 }
 
 #endif //PLAYGROUND_LIBRARY_H
