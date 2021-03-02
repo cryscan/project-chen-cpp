@@ -97,7 +97,7 @@ void set_gait_combos(towr::NlpFormulation& formulation,
     // auto ee_count = formulation.model_.dynamic_model_->GetEECount();
 
     auto gait = towr::GaitGenerator::MakeGaitGenerator(0);
-    gait->SetCombo(static_cast<towr::GaitGenerator::Combos>(combos));
+    gait->SetCombo(combos);
 
     formulation.params_.ee_phase_durations_.clear();
     formulation.params_.ee_in_contact_at_start_.clear();
@@ -209,13 +209,13 @@ towr::SplineHolder async_optimize(int session) {
 
 void start_optimization(int session) {
     auto[solution, lock] = get_solution(session);
-    solution->future = std::async(async_optimize, session);
+    solution->future = std::async(std::launch::async, async_optimize, session);
     solution->ready = false;
 }
 
 bool update_solution(Session::Solution& solution, Lock&) {
     if (!solution.ready) {
-        if (solution.future.valid()) {
+        if (solution.future.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
             solution.current = solution.future.get();
             solution.ready = true;
         } else return false;
