@@ -26,10 +26,20 @@ struct Session {
     std::mutex formulation_mutex;
 
     struct Solution {
-        std::future<towr::SplineHolder> future;
-        towr::SplineHolder current;
+        union {
+            std::future<towr::SplineHolder> future;
+            towr::SplineHolder current;
+        };
         bool ready = false;
+
+        Solution() : future() {}
+
+        ~Solution() {
+            if (ready) current.~SplineHolder();
+            else future.~future();
+        }
     } solution;
+
     std::mutex solution_mutex;
 };
 
@@ -80,22 +90,25 @@ std::tuple<Session::Solution*, Lock> get_solution(int session) {
     return std::make_tuple(solution, std::move(lock));
 }
 
-void init_gait_combos(towr::NlpFormulation& formulation,
-                      towr::GaitGenerator::Combos combos,
-                      double duration,
-                      Lock&) {
-    auto ee_count = formulation.model_.dynamic_model_->GetEECount();
+void set_gait_combos(towr::NlpFormulation& formulation,
+                     towr::GaitGenerator::Combos combos,
+                     double duration,
+                     Lock&) {
+    // auto ee_count = formulation.model_.dynamic_model_->GetEECount();
 
-    auto gait = towr::GaitGenerator::MakeGaitGenerator(ee_count);
+    auto gait = towr::GaitGenerator::MakeGaitGenerator(0);
     gait->SetCombo(static_cast<towr::GaitGenerator::Combos>(combos));
 
-    for (int i = 0; i < ee_count; ++i) {
-        formulation.params_.ee_phase_durations_.push_back(gait->GetPhaseDurations(duration, i));
-        formulation.params_.ee_in_contact_at_start_.push_back(gait->IsInContactAtStart(i));
-    }
+    formulation.params_.ee_phase_durations_.clear();
+    formulation.params_.ee_in_contact_at_start_.clear();
+
+    // for (int i = 0; i < ee_count; ++i) {
+    formulation.params_.ee_phase_durations_.push_back(gait->GetPhaseDurations(duration, 0));
+    formulation.params_.ee_in_contact_at_start_.push_back(gait->IsInContactAtStart(0));
+    // }
 }
 
-int create_session() {
+int create_session(double duration) {
     auto lock = std::unique_lock(sessions.mutex);
     auto iter = std::find(sessions.data.begin(), sessions.data.end(), nullptr);
     auto session = std::make_unique<Session>();
@@ -104,8 +117,9 @@ int create_session() {
     auto& formulation = session->formulation;
     formulation.model_ = towr::RobotModel::Monoped;
     formulation.terrain_ = towr::HeightMap::MakeTerrain(towr::HeightMap::FlatID);
+    formulation.initial_ee_W_ = formulation.model_.kinematic_model_->GetNominalStanceInBase();
 
-    init_gait_combos(formulation, towr::GaitGenerator::C0, 2.0, lock);
+    set_gait_combos(formulation, towr::GaitGenerator::C0, duration, lock);
 
     if (iter != sessions.data.end()) {
         *iter = std::move(session);
@@ -167,10 +181,10 @@ void set_final_base_angular_velocity(int session, double x, double y, double z) 
     formulation->final_base_.ang.at(towr::kVel) << x, y, z;
 }
 
-void set_initial_end_effector_position(int session, int id, double x, double y) {
+void set_initial_ee_position(int session, double x, double y) {
     auto[formulation, lock] = get_formulation(session);
     auto z = formulation->terrain_->GetHeight(x, y);
-    formulation->initial_ee_W_[id] << x, y, z;
+    formulation->initial_ee_W_[0] << x, y, z;
 }
 
 towr::SplineHolder async_optimize(int session) {
@@ -209,46 +223,23 @@ bool update_solution(Session::Solution& solution, Lock&) {
     return true;
 }
 
-bool get_base_linear_position(int session, double time, double* output) {
+bool
+get_solution(int session,
+             double time,
+             double* base_linear,
+             double* base_angular,
+             double* ee_motion,
+             double* ee_force,
+             bool* contact) {
     auto[solution, lock] = get_solution(session);
     if (!update_solution(*solution, lock)) return false;
 
-    auto point = solution->current.base_linear_->GetPoint(time).p();
-    Eigen::Map<Eigen::VectorXd>(output, point.rows(), 1) = point;
-    return true;
-}
+    Eigen::Map<Eigen::VectorXd>(base_linear, 3) = solution->current.base_linear_->GetPoint(time).p();
+    Eigen::Map<Eigen::VectorXd>(base_angular, 3) = solution->current.base_angular_->GetPoint(time).p();
 
-bool get_base_angular_position(int session, double time, double* output) {
-    auto[solution, lock] = get_solution(session);
-    if (!update_solution(*solution, lock)) return false;
+    Eigen::Map<Eigen::VectorXd>(ee_motion, 3) = solution->current.ee_motion_[0]->GetPoint(time).p();
+    Eigen::Map<Eigen::VectorXd>(ee_force, 3) = solution->current.ee_force_[0]->GetPoint(time).p();
+    *contact = solution->current.phase_durations_[0]->IsContactPhase(time);
 
-    auto point = solution->current.base_angular_->GetPoint(time).p();
-    Eigen::Map<Eigen::VectorXd>(output, point.rows(), 1) = point;
-    return true;
-}
-
-bool get_end_effector_position(int session, int id, double time, double* output) {
-    auto[solution, lock] = get_solution(session);
-    if (!update_solution(*solution, lock)) return false;
-
-    auto point = solution->current.ee_motion_.at(id)->GetPoint(time).p();
-    Eigen::Map<Eigen::VectorXd>(output, point.rows(), 1) = point;
-    return true;
-}
-
-bool get_end_effector_force(int session, int id, double time, double* output) {
-    auto[solution, lock] = get_solution(session);
-    if (!update_solution(*solution, lock)) return false;
-
-    auto point = solution->current.ee_force_.at(id)->GetPoint(time).p();
-    Eigen::Map<Eigen::VectorXd>(output, point.rows(), 1) = point;
-    return true;
-}
-
-bool get_end_effector_contact(int session, int id, double time, bool* output) {
-    auto[solution, lock] = get_solution(session);
-    if (!update_solution(*solution, lock)) return false;
-
-    *output = solution->current.phase_durations_.at(id)->IsContactPhase(time);
     return true;
 }
