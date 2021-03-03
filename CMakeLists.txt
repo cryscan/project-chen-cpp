@@ -9,5 +9,5 @@ find_package(ifopt 2.0.1 REQUIRED)
 add_executable(hopper_example hopper_example.cpp)
 target_link_libraries(hopper_example towr::towr ifopt::ifopt_ipopt)
 
-add_library(hopper SHARED library.cpp)
+add_library(hopper SHARED library.cpp monoped_gait_generator.cpp)
 target_link_libraries(hopper towr::towr ifopt::ifopt_ipopt pthread)
