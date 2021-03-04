@@ -9,7 +9,7 @@ extern "C" {
 int create_session();
 void end_session(int session);
 
-struct Boundary {
+struct Bound {
     double initial_base_linear_position[3];
     double initial_base_linear_velocity[3];
     double initial_base_angular_position[3];
@@ -25,21 +25,7 @@ struct Boundary {
     double duration;
 };
 
-/*
-void set_initial_base_linear_position(int session, double x, double y, double z);
-void set_initial_base_linear_velocity(int session, double x, double y, double z);
-void set_initial_base_angular_position(int session, double x, double y, double z);
-void set_initial_base_angular_velocity(int session, double x, double y, double z);
-
-void set_final_base_linear_position(int session, double x, double y, double z);
-void set_final_base_linear_velocity(int session, double x, double y, double z);
-void set_final_base_angular_position(int session, double x, double y, double z);
-void set_final_base_angular_velocity(int session, double x, double y, double z);
-
-void set_initial_ee_position(int session, double x, double y);
- */
-
-void set_boundary(int session, const Boundary* boundary);
+void set_bound(int session, const Bound* bound);
 
 void start_optimization(int session);
 

@@ -142,55 +142,7 @@ void end_session(int session) {
     sessions.data[session] = nullptr;
 }
 
-/*
-void set_initial_base_linear_position(int session, double x, double y, double z) {
-    auto[formulation, lock] = get_formulation(session);
-    formulation->initial_base_.lin.at(towr::kPos) << x, y, z;
-}
-
-void set_initial_base_linear_velocity(int session, double x, double y, double z) {
-    auto[formulation, lock] = get_formulation(session);
-    formulation->initial_base_.lin.at(towr::kVel) << x, y, z;
-}
-
-void set_initial_base_angular_position(int session, double x, double y, double z) {
-    auto[formulation, lock] = get_formulation(session);
-    formulation->initial_base_.ang.at(towr::kPos) << x, y, z;
-}
-
-void set_initial_base_angular_velocity(int session, double x, double y, double z) {
-    auto[formulation, lock] = get_formulation(session);
-    formulation->initial_base_.ang.at(towr::kVel) << x, y, z;
-}
-
-void set_final_base_linear_position(int session, double x, double y, double z) {
-    auto[formulation, lock] = get_formulation(session);
-    formulation->final_base_.lin.at(towr::kPos) << x, y, z;
-}
-
-void set_final_base_linear_velocity(int session, double x, double y, double z) {
-    auto[formulation, lock] = get_formulation(session);
-    formulation->final_base_.lin.at(towr::kVel) << x, y, z;
-}
-
-void set_final_base_angular_position(int session, double x, double y, double z) {
-    auto[formulation, lock] = get_formulation(session);
-    formulation->final_base_.ang.at(towr::kPos) << x, y, z;
-}
-
-void set_final_base_angular_velocity(int session, double x, double y, double z) {
-    auto[formulation, lock] = get_formulation(session);
-    formulation->final_base_.ang.at(towr::kVel) << x, y, z;
-}
-
-void set_initial_ee_position(int session, double x, double y) {
-    auto[formulation, lock] = get_formulation(session);
-    auto z = formulation->terrain_->GetHeight(x, y);
-    formulation->initial_ee_W_[0] << x, y, z;
-}
- */
-
-void set_boundary(int session, const Boundary* boundary) {
+void set_bound(int session, const Bound* bound) {
     auto[formulation, lock] = get_formulation(session);
 
     using Eigen::Map;
@@ -199,23 +151,23 @@ void set_boundary(int session, const Boundary* boundary) {
     using towr::kVel;
     constexpr auto C0 = towr::GaitGenerator::Combos::C0;
 
-    formulation->initial_base_.lin.at(kPos) = Map<const VectorXd>(boundary->initial_base_linear_position, 3);
-    formulation->initial_base_.lin.at(kVel) = Map<const VectorXd>(boundary->initial_base_linear_velocity, 3);
-    formulation->initial_base_.ang.at(kPos) = Map<const VectorXd>(boundary->initial_base_angular_position, 3);
-    formulation->initial_base_.ang.at(kVel) = Map<const VectorXd>(boundary->initial_base_angular_velocity, 3);
+    formulation->initial_base_.lin.at(kPos) = Map<const VectorXd>(bound->initial_base_linear_position, 3);
+    formulation->initial_base_.lin.at(kVel) = Map<const VectorXd>(bound->initial_base_linear_velocity, 3);
+    formulation->initial_base_.ang.at(kPos) = Map<const VectorXd>(bound->initial_base_angular_position, 3);
+    formulation->initial_base_.ang.at(kVel) = Map<const VectorXd>(bound->initial_base_angular_velocity, 3);
 
-    formulation->final_base_.lin.at(kPos) = Map<const VectorXd>(boundary->final_base_linear_position, 3);
-    formulation->final_base_.lin.at(kVel) = Map<const VectorXd>(boundary->final_base_linear_velocity, 3);
-    formulation->final_base_.ang.at(kPos) = Map<const VectorXd>(boundary->final_base_angular_position, 3);
-    formulation->final_base_.ang.at(kVel) = Map<const VectorXd>(boundary->final_base_angular_velocity, 3);
+    formulation->final_base_.lin.at(kPos) = Map<const VectorXd>(bound->final_base_linear_position, 3);
+    formulation->final_base_.lin.at(kVel) = Map<const VectorXd>(bound->final_base_linear_velocity, 3);
+    formulation->final_base_.ang.at(kPos) = Map<const VectorXd>(bound->final_base_angular_position, 3);
+    formulation->final_base_.ang.at(kVel) = Map<const VectorXd>(bound->final_base_angular_velocity, 3);
 
     {
         formulation->initial_ee_W_.clear();
-        VectorXd initial_ee_position = Map<const VectorXd>(boundary->initial_ee_position, 3);
+        VectorXd initial_ee_position = Map<const VectorXd>(bound->initial_ee_position, 3);
         formulation->initial_ee_W_.push_back(initial_ee_position);
     }
 
-    init_gait(*formulation, C0, boundary->duration, lock);
+    init_gait(*formulation, C0, bound->duration, lock);
 }
 
 towr::SplineHolder async_optimize(int session) {
