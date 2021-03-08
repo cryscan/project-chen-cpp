@@ -6,8 +6,8 @@ set(CMAKE_CXX_STANDARD 20)
 find_package(towr 1.2 REQUIRED)
 find_package(ifopt 2.0.1 REQUIRED)
 
-add_executable(hopper_example hopper_example.cpp)
+add_executable(hopper_example hopper_example.cpp nlp_formulation.cpp)
 target_link_libraries(hopper_example towr::towr ifopt::ifopt_ipopt)
 
-add_library(hopper SHARED library.cpp monoped_gait_generator.cpp)
+add_library(hopper SHARED library.cpp nlp_formulation.cpp nodes_variables.cpp)
 target_link_libraries(hopper towr::towr ifopt::ifopt_ipopt pthread)

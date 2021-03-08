@@ -17,7 +17,6 @@
 #include <ifopt/ipopt_solver.h>
 
 #include "library.h"
-#include "monoped_gait_generator.h"
 
 
 using Lock = std::unique_lock<std::mutex>;
@@ -91,23 +90,19 @@ std::tuple<Session::Solution*, Lock> get_solution(int session) {
     return std::make_tuple(solution, std::move(lock));
 }
 
-void init_gait(towr::NlpFormulation& formulation,
-               towr::GaitGenerator::Combos combo,
-               double duration,
-               Lock&) {
-    // auto ee_count = formulation.model_.dynamic_model_->GetEECount();
+void init_gait(towr::NlpFormulation& formulation, double duration, Lock&) {
+    auto ee_count = formulation.model_.dynamic_model_->GetEECount();
 
-    // auto gait = towr::GaitGenerator::MakeGaitGenerator(0);
-    std::unique_ptr<towr::GaitGenerator> gait = std::make_unique<MonopedGaitGenerator>();
-    gait->SetCombo(combo);
+    auto gait = towr::GaitGenerator::MakeGaitGenerator(ee_count);
+    gait->SetCombo(towr::GaitGenerator::C0);
 
     formulation.params_.ee_phase_durations_.clear();
     formulation.params_.ee_in_contact_at_start_.clear();
 
-    // for (int i = 0; i < ee_count; ++i) {
-    formulation.params_.ee_phase_durations_.push_back(gait->GetPhaseDurations(duration, 0));
-    formulation.params_.ee_in_contact_at_start_.push_back(gait->IsInContactAtStart(0));
-    // }
+    for (int id = 0; id < ee_count; ++id) {
+        formulation.params_.ee_phase_durations_.push_back(gait->GetPhaseDurations(duration, id));
+        formulation.params_.ee_in_contact_at_start_.push_back(gait->IsInContactAtStart(id));
+    }
 }
 
 int create_session() {
@@ -149,7 +144,6 @@ void set_bound(int session, const Bound* bound) {
     using Eigen::VectorXd;
     using towr::kPos;
     using towr::kVel;
-    constexpr auto C0 = towr::GaitGenerator::Combos::C0;
 
     formulation->initial_base_.lin.at(kPos) = Map<const VectorXd>(bound->initial_base_linear_position, 3);
     formulation->initial_base_.lin.at(kVel) = Map<const VectorXd>(bound->initial_base_linear_velocity, 3);
@@ -161,13 +155,11 @@ void set_bound(int session, const Bound* bound) {
     formulation->final_base_.ang.at(kPos) = Map<const VectorXd>(bound->final_base_angular_position, 3);
     formulation->final_base_.ang.at(kVel) = Map<const VectorXd>(bound->final_base_angular_velocity, 3);
 
-    {
-        formulation->initial_ee_W_.clear();
-        VectorXd initial_ee_position = Map<const VectorXd>(bound->initial_ee_position, 3);
-        formulation->initial_ee_W_.push_back(initial_ee_position);
-    }
+    // TODO: multiple legs.
+    formulation->initial_ee_W_.clear();
+    formulation->initial_ee_W_.push_back(Map<const VectorXd>(bound->initial_ee_position, 3));
 
-    init_gait(*formulation, C0, bound->duration, lock);
+    init_gait(*formulation, bound->duration, lock);
 }
 
 towr::SplineHolder async_optimize(int session) {
