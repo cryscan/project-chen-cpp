@@ -30,10 +30,9 @@ struct Session {
     struct Formulation {
         NlpFormulation nlp_formulation;
 
-        // Other options.
-        bool optimize_phase_durations = false;
-        int max_iter = 0;
-        double max_cpu_time = 0;
+        // options
+        double max_cpu_time{0};
+        int max_iter{0};
     } formulation;
     std::mutex formulation_mutex;
 
@@ -89,32 +88,30 @@ std::tuple<Session::Solution*, Lock> get_solution(int session) {
     return std::make_tuple(solution, std::move(lock));
 }
 
-void init_gait(NlpFormulation& formulation, double duration, Lock&) {
-    auto ee_count = formulation.model_.dynamic_model_->GetEECount();
+void init_gait(Session::Formulation& formulation, double duration, Lock&) {
+    auto& f = formulation.nlp_formulation;
+    auto ee_count = f.model_.dynamic_model_->GetEECount();
 
     auto gait = GaitGenerator::MakeGaitGenerator(ee_count);
     gait->SetCombo(GaitGenerator::C0);
 
-    formulation.params_.ee_phase_durations_.clear();
-    formulation.params_.ee_in_contact_at_start_.clear();
+    f.params_.ee_phase_durations_.clear();
+    f.params_.ee_in_contact_at_start_.clear();
 
     for (int id = 0; id < ee_count; ++id) {
-        formulation.params_.ee_phase_durations_.push_back(gait->GetPhaseDurations(duration, id));
-        formulation.params_.ee_in_contact_at_start_.push_back(gait->IsInContactAtStart(id));
+        f.params_.ee_phase_durations_.push_back(gait->GetPhaseDurations(duration, id));
+        f.params_.ee_in_contact_at_start_.push_back(gait->IsInContactAtStart(id));
     }
 }
 
-int create_session() {
+int create_session(int model) {
     auto lock = std::unique_lock(sessions.mutex);
     auto iter = std::find(sessions.data.begin(), sessions.data.end(), nullptr);
     auto session = std::make_unique<Session>();
 
-    // TODO: make this more flexible.
     auto& formulation = session->formulation;
-    formulation.nlp_formulation.model_ = towr::RobotModel::Monoped;
+    formulation.nlp_formulation.model_ = static_cast<towr::RobotModel::Robot>(model);
     formulation.nlp_formulation.terrain_ = towr::HeightMap::MakeTerrain(towr::HeightMap::FlatID);
-
-    // init_gait(formulation, towr::GaitGenerator::C0, duration, lock);
 
     if (iter != sessions.data.end()) {
         *iter = std::move(session);
@@ -136,30 +133,53 @@ void end_session(int session) {
     sessions.data[session] = nullptr;
 }
 
+void get_model_info(int session, ModelInfo* output) {
+    auto[formulation, lock]=get_formulation(session);
+    auto& f = formulation->nlp_formulation;
+
+    using Eigen::Vector3d;
+    using Eigen::Map;
+
+    Map<Vector3d>(output->max_deviation, 3) = f.model_.kinematic_model_->GetMaximumDeviationFromNominal();
+
+    auto nominal_stance = f.model_.kinematic_model_->GetNominalStanceInBase();
+    for (int id = 0; id < f.model_.kinematic_model_->GetNumberOfEndeffectors(); ++id)
+        Map<Vector3d>(output->nominal_stance[id], 3) = nominal_stance[id];
+}
+
+int get_ee_count(int session) {
+    auto[formulation, lock]=get_formulation(session);
+    return formulation->nlp_formulation.model_.dynamic_model_->GetEECount();
+}
+
 void set_bound(int session, const Bound* bound) {
     auto[formulation, lock] = get_formulation(session);
+    auto& f = formulation->nlp_formulation;
 
     using Eigen::Map;
-    using Eigen::VectorXd;
+    using Eigen::Vector3d;
     using towr::kPos;
     using towr::kVel;
 
-    auto& formulation_ = formulation->nlp_formulation;
-    formulation_.initial_base_.lin.at(kPos) = Map<const VectorXd>(bound->initial_base_linear_position, 3);
-    formulation_.initial_base_.lin.at(kVel) = Map<const VectorXd>(bound->initial_base_linear_velocity, 3);
-    formulation_.initial_base_.ang.at(kPos) = Map<const VectorXd>(bound->initial_base_angular_position, 3);
-    formulation_.initial_base_.ang.at(kVel) = Map<const VectorXd>(bound->initial_base_angular_velocity, 3);
+    f.initial_base_.lin.at(kPos) = Map<const Vector3d>(bound->initial_base_linear_position, 3);
+    f.initial_base_.lin.at(kVel) = Map<const Vector3d>(bound->initial_base_linear_velocity, 3);
+    f.initial_base_.ang.at(kPos) = Map<const Vector3d>(bound->initial_base_angular_position, 3);
+    f.initial_base_.ang.at(kVel) = Map<const Vector3d>(bound->initial_base_angular_velocity, 3);
 
-    formulation_.final_base_.lin.at(kPos) = Map<const VectorXd>(bound->final_base_linear_position, 3);
-    formulation_.final_base_.lin.at(kVel) = Map<const VectorXd>(bound->final_base_linear_velocity, 3);
-    formulation_.final_base_.ang.at(kPos) = Map<const VectorXd>(bound->final_base_angular_position, 3);
-    formulation_.final_base_.ang.at(kVel) = Map<const VectorXd>(bound->final_base_angular_velocity, 3);
+    f.final_base_.lin.at(kPos) = Map<const Vector3d>(bound->final_base_linear_position, 3);
+    f.final_base_.lin.at(kVel) = Map<const Vector3d>(bound->final_base_linear_velocity, 3);
+    f.final_base_.ang.at(kPos) = Map<const Vector3d>(bound->final_base_angular_position, 3);
+    f.final_base_.ang.at(kVel) = Map<const Vector3d>(bound->final_base_angular_velocity, 3);
 
-    // TODO: multiple legs.
-    formulation_.initial_ee_W_.clear();
-    formulation_.initial_ee_W_.push_back(Map<const VectorXd>(bound->initial_ee_position, 3));
+    f.initial_ee_W_.clear();
+    for (int id = 0; id < f.model_.dynamic_model_->GetEECount(); ++id)
+        f.initial_ee_W_.push_back(Map<const Vector3d>(bound->initial_ee_positions[id], 3));
 
-    init_gait(formulation_, bound->duration, lock);
+    init_gait(*formulation, bound->duration, lock);
+
+    formulation->max_cpu_time = bound->max_cpu_time;
+    formulation->max_iter = bound->max_iter;
+    if (bound->optimize_phase_durations) f.params_.OptimizePhaseDurations();
 }
 
 SplineHolder async_optimize(int session) {
@@ -191,15 +211,6 @@ void start_optimization(int session) {
 }
 
 bool update_solution(Session::Solution& solution, Lock&) {
-    /*
-    if (!solution.ready) {
-        if (!solution.future.valid()) return false;
-        if (solution.future.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
-            solution.current = solution.future.get();
-            solution.ready = true;
-        } else return false;
-    }
-     */
     if (std::holds_alternative<std::future<SplineHolder>>(solution)) {
         auto& future = std::get<std::future<SplineHolder>>(solution);
         if (!future.valid()) return false;
@@ -213,24 +224,28 @@ bool update_solution(Session::Solution& solution, Lock&) {
 bool get_solution(int session, double time, State* output) {
     auto[solution, lock] = get_solution(session);
     if (!update_solution(*solution, lock)) return false;
+    auto& current = std::get<SplineHolder>(*solution);
 
     using Eigen::Map;
-    using Eigen::VectorXd;
+    using Eigen::Vector3d;
 
-    auto& current = std::get<SplineHolder>(*solution);
-    {
-        auto point = current.base_linear_->GetPoint(time);
-        Map<VectorXd>(output->base_linear_position, 3) = point.p();
-        Map<VectorXd>(output->base_linear_velocity, 3) = point.v();
-    }
-    {
-        auto point = current.base_angular_->GetPoint(time);
-        Map<VectorXd>(output->base_angular_position, 3) = point.p();
-        Map<VectorXd>(output->base_angular_velocity, 3) = point.v();
-    }
-    Map<VectorXd>(output->ee_motion, 3) = current.ee_motion_[0]->GetPoint(time).p();
-    Map<VectorXd>(output->ee_force, 3) = current.ee_force_[0]->GetPoint(time).p();
-    output->contact = current.phase_durations_[0]->IsContactPhase(time);
+    auto point = current.base_linear_->GetPoint(time);
+    Map<Vector3d>(output->base_linear_position, 3) = point.p();
+    Map<Vector3d>(output->base_linear_velocity, 3) = point.v();
+
+    point = current.base_angular_->GetPoint(time);
+    Map<Vector3d>(output->base_angular_position, 3) = point.p();
+    Map<Vector3d>(output->base_angular_velocity, 3) = point.v();
+
+    for (int id = 0; id < current.ee_motion_.size(); ++id)
+        Map<Vector3d>(output->ee_motions[id], 3) = current.ee_motion_[id]->GetPoint(time).p();
+
+    for (int id = 0; id < current.ee_force_.size(); ++id)
+        Map<Vector3d>(output->ee_forces[id], 3) = current.ee_force_[id]->GetPoint(time).p();
+
+    for (int id = 0; id < current.phase_durations_.size(); ++id)
+        output->contacts[id] = current.phase_durations_[id]->IsContactPhase(time);
+
 
     return true;
 }
