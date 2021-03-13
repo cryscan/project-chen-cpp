@@ -28,19 +28,21 @@ using Lock = std::unique_lock<std::mutex>;
 
 std::mutex solver_mutex;
 
-struct Session {
-    struct Formulation {
-        NlpFormulation nlp_formulation;
+struct Formulation {
+    using Ptr = std::shared_ptr<Formulation>;
 
-        // Options
-        double max_cpu_time = 0;
-        int max_iter = 0;
-    } formulation;
-    std::mutex formulation_mutex;
+    NlpFormulation nlp_formulation;
+    double max_cpu_time = 0;
+    int max_iter = 0;
 
-    using Solution = std::variant<std::future<SplineHolder>, SplineHolder>;
-    Solution solution = std::future<SplineHolder>();
-    std::mutex solution_mutex;
+    std::mutex mutex;
+};
+
+struct Solution {
+    using Ptr = std::shared_ptr<Solution>;
+
+    std::variant<std::future<SplineHolder>, SplineHolder> variant;
+    std::mutex mutex;
 };
 
 struct InvalidSessionError : std::exception {
@@ -57,40 +59,39 @@ private:
 };
 
 struct {
-    std::vector<std::unique_ptr<Session>> data;
+    std::vector<Formulation::Ptr> formulations;
+    std::vector<Solution::Ptr> solutions;
     std::mutex mutex;
 } static sessions;
 
 void check_session(int session, Lock&) {
-    if (session >= sessions.data.size() || sessions.data[session] == nullptr)
+    if (session >= sessions.formulations.size() || sessions.formulations[session] == nullptr)
         throw InvalidSessionError(session);
 }
 
-std::tuple<Session::Formulation*, Lock> get_formulation(int session) {
-    auto lock = std::unique_lock(sessions.mutex);
+std::tuple<Formulation::Ptr, Lock> get_formulation(int session) {
+    auto lock = Lock(sessions.mutex);
     try { check_session(session, lock); }
     catch (InvalidSessionError& error) { std::cerr << error.what() << std::endl; }
 
-    auto lock_ = std::move(lock);
-    auto formulation = &sessions.data[session]->formulation;
-    lock = std::unique_lock(sessions.data[session]->formulation_mutex);
+    auto formulation = sessions.formulations.at(session);
+    Lock(formulation->mutex).swap(lock);
 
     return std::make_tuple(formulation, std::move(lock));
 }
 
-std::tuple<Session::Solution*, Lock> get_solution(int session) {
-    auto lock = std::unique_lock(sessions.mutex);
+std::tuple<Solution::Ptr, Lock> get_solution(int session) {
+    auto lock = Lock(sessions.mutex);
     try { check_session(session, lock); }
     catch (InvalidSessionError& error) { std::cerr << error.what() << std::endl; }
 
-    auto lock_ = std::move(lock);
-    auto solution = &sessions.data[session]->solution;
-    lock = std::unique_lock(sessions.data[session]->solution_mutex);
+    auto solution = sessions.solutions.at(session);
+    Lock(solution->mutex).swap(lock);
 
     return std::make_tuple(solution, std::move(lock));
 }
 
-void init_gait(Session::Formulation& formulation, double duration, Lock&) {
+void init_gait(Formulation& formulation, double duration, Lock&) {
     auto& f = formulation.nlp_formulation;
     auto ee_count = f.model_.dynamic_model_->GetEECount();
 
@@ -108,21 +109,24 @@ void init_gait(Session::Formulation& formulation, double duration, Lock&) {
 
 int create_session(int model) {
     auto lock = std::unique_lock(sessions.mutex);
-    auto iter = std::find(sessions.data.begin(), sessions.data.end(), nullptr);
-    auto session = std::make_unique<Session>();
+    auto iter = std::find(sessions.formulations.begin(), sessions.formulations.end(), nullptr);
 
-    auto& formulation = session->formulation;
-    formulation.nlp_formulation.model_ = static_cast<towr::RobotModel::Robot>(model);
-    formulation.nlp_formulation.terrain_ = towr::HeightMap::MakeTerrain(towr::HeightMap::FlatID);
+    auto formulation = std::make_shared<Formulation>();
+    formulation->nlp_formulation.model_ = static_cast<towr::RobotModel::Robot>(model);
+    formulation->nlp_formulation.terrain_ = towr::HeightMap::MakeTerrain(towr::HeightMap::FlatID);
 
-    if (iter != sessions.data.end()) {
-        *iter = std::move(session);
-        return iter - sessions.data.begin();
+    auto solution = std::make_shared<Solution>();
+    auto index = iter - sessions.formulations.begin();
+
+    if (iter != sessions.formulations.end()) {
+        *iter = std::move(formulation);
+        sessions.solutions.at(index) = solution;
     } else {
-        auto index = sessions.data.size();
-        sessions.data.push_back(std::move(session));
-        return index;
+        sessions.formulations.push_back(std::move(formulation));
+        sessions.solutions.push_back(std::move(solution));
     }
+
+    return index;
 }
 
 void end_session(int session) {
@@ -132,7 +136,9 @@ void end_session(int session) {
         std::cerr << error.what() << std::endl;
         return;
     }
-    sessions.data[session] = nullptr;
+
+    sessions.formulations.at(session) = nullptr;
+    sessions.solutions.at(session) = nullptr;
 }
 
 void get_robot_model(int session, RobotModel* robot_model) {
@@ -146,7 +152,7 @@ void get_robot_model(int session, RobotModel* robot_model) {
 
     auto nominal_stance = f.model_.kinematic_model_->GetNominalStanceInBase();
     for (int id = 0; id < f.model_.kinematic_model_->GetNumberOfEndeffectors(); ++id)
-        Map<Vector3d>(robot_model->nominal_stance[id], 3) = nominal_stance[id];
+        Map<Vector3d>(robot_model->nominal_stance[id], 3) = nominal_stance.at(id);
 
     robot_model->mass = f.model_.dynamic_model_->m();
     robot_model->ee_count = f.model_.dynamic_model_->GetEECount();
@@ -209,7 +215,7 @@ SplineHolder async_optimize(int session) {
     if (formulation->max_iter > 0) solver.SetOption("max_iter", formulation->max_iter);
     if (formulation->max_cpu_time > 0) solver.SetOption("max_cpu_time", formulation->max_cpu_time);
 
-    lock = Lock(solver_mutex);
+    Lock(solver_mutex).swap(lock);
     solver.Solve(problem);
 
     return std::move(solution);
@@ -217,14 +223,14 @@ SplineHolder async_optimize(int session) {
 
 void start_optimization(int session) {
     auto[solution, lock] = get_solution(session);
-    *solution = std::async(std::launch::async, async_optimize, session);
+    solution->variant = std::async(std::launch::async, async_optimize, session);
 }
 
-bool update_solution(Session::Solution* solution, Lock&) {
-    if (auto future = std::get_if<std::future<SplineHolder>>(solution)) {
+bool update_solution(Solution& solution, Lock&) {
+    if (auto future = std::get_if<std::future<SplineHolder>>(&solution.variant)) {
         if (!future->valid()) return false;
         if (future->wait_for(std::chrono::seconds(0)) == std::future_status::ready)
-            *solution = future->get();
+            solution.variant = future->get();
         else return false;
     }
     return true;
@@ -233,16 +239,16 @@ bool update_solution(Session::Solution* solution, Lock&) {
 bool solution_ready(int session) {
     auto[solution, lock] = get_solution(session);
 
-    if (auto future = std::get_if<std::future<SplineHolder>>(solution))
+    if (auto future = std::get_if<std::future<SplineHolder>>(&solution->variant))
         if (!future->valid()) return true;
 
-    return update_solution(solution, lock);
+    return update_solution(*solution, lock);
 }
 
 bool get_solution_state(int session, double time, State* state) {
     auto[solution, lock] = get_solution(session);
-    if (!update_solution(solution, lock)) return false;
-    auto& current = std::get<SplineHolder>(*solution);
+    if (!update_solution(*solution, lock)) return false;
+    auto& current = std::get<SplineHolder>(solution->variant);
 
     using Eigen::Map;
     using Eigen::Vector3d;
@@ -256,13 +262,13 @@ bool get_solution_state(int session, double time, State* state) {
     Map<Vector3d>(state->base_angular_velocity, 3) = point.v();
 
     for (int id = 0; id < current.ee_motion_.size(); ++id)
-        Map<Vector3d>(state->ee_motions[id], 3) = current.ee_motion_[id]->GetPoint(time).p();
+        Map<Vector3d>(state->ee_motions[id], 3) = current.ee_motion_.at(id)->GetPoint(time).p();
 
     for (int id = 0; id < current.ee_force_.size(); ++id)
-        Map<Vector3d>(state->ee_forces[id], 3) = current.ee_force_[id]->GetPoint(time).p();
+        Map<Vector3d>(state->ee_forces[id], 3) = current.ee_force_.at(id)->GetPoint(time).p();
 
     for (int id = 0; id < current.phase_durations_.size(); ++id)
-        state->contacts[id] = current.phase_durations_[id]->IsContactPhase(time);
+        state->contacts[id] = current.phase_durations_.at(id)->IsContactPhase(time);
 
     return true;
 }
