@@ -21,6 +21,8 @@ void get_robot_model(int session, RobotModel* robot_model);
 int get_ee_count(int session);
 
 struct Bound {
+    double duration;
+
     double initial_base_linear_position[3];
     double initial_base_linear_velocity[3];
     double initial_base_angular_position[3];
@@ -33,7 +35,10 @@ struct Bound {
 
     double initial_ee_positions[4][3];
 
-    double duration;
+    unsigned char bounds_final_linear_position;
+    unsigned char bounds_final_linear_velocity;
+    unsigned char bounds_final_angular_position;
+    unsigned char bounds_final_angular_velocity;
 };
 
 struct Option {

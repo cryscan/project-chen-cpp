@@ -4,6 +4,7 @@
 
 #include <iostream>
 #include <vector>
+#include <bitset>
 #include <variant>
 #include <memory>
 #include <future>
@@ -107,6 +108,18 @@ void init_gait(Formulation& formulation, double duration, Lock&) {
     }
 }
 
+std::vector<int> convert_bound_dims(uint8_t bounds) {
+    using towr::Dim3D::X;
+    using towr::Dim3D::Y;
+    using towr::Dim3D::Z;
+
+    auto bitset = std::bitset<3>(bounds);
+    std::vector<int> result;
+    for (auto dim: {X, Y, Z})
+        if (bitset[dim]) result.push_back(dim);
+    return result;
+}
+
 int create_session(int model) {
     auto lock = std::unique_lock(sessions.mutex);
     auto iter = std::find(sessions.formulations.begin(), sessions.formulations.end(), nullptr);
@@ -185,6 +198,11 @@ void set_bound(int session, const Bound* bound) {
     f.initial_ee_W_.clear();
     for (int id = 0; id < f.model_.dynamic_model_->GetEECount(); ++id)
         f.initial_ee_W_.push_back(Map<const Vector3d>(bound->initial_ee_positions[id], 3));
+
+    f.params_.bounds_final_lin_pos_ = convert_bound_dims(bound->bounds_final_linear_position);
+    f.params_.bounds_final_lin_vel_ = convert_bound_dims(bound->bounds_final_linear_velocity);
+    f.params_.bounds_final_ang_pos_ = convert_bound_dims(bound->bounds_final_angular_position);
+    f.params_.bounds_final_ang_vel_ = convert_bound_dims(bound->bounds_final_angular_velocity);
 
     init_gait(*formulation, bound->duration, lock);
 }
