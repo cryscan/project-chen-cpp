@@ -9,12 +9,15 @@ extern "C" {
 int create_session(int model);
 void end_session(int session);
 
-struct ModelInfo {
+struct RobotModel {
     double nominal_stance[4][3];
     double max_deviation[3];
+
+    double mass;
+    int ee_count;
 };
 
-void get_model_info(int session, ModelInfo* output);
+void get_robot_model(int session, RobotModel* robot_model);
 int get_ee_count(int session);
 
 struct Bound {
@@ -31,13 +34,16 @@ struct Bound {
     double initial_ee_positions[4][3];
 
     double duration;
+};
 
+struct Option {
     double max_cpu_time;
     int max_iter;
     bool optimize_phase_durations;
 };
 
 void set_bound(int session, const Bound* bound);
+void set_option(int session, const Option* option);
 
 void start_optimization(int session);
 
@@ -52,8 +58,8 @@ struct State {
     bool contacts[4];
 };
 
-bool get_solution(int session, double time, State* output);
 bool solution_ready(int session);
+bool get_solution_state(int session, double time, State* state);
 }
 
 #endif //PLAYGROUND_LIBRARY_H

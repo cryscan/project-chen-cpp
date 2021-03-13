@@ -26,13 +26,15 @@ using towr::GaitGenerator;
 
 using Lock = std::unique_lock<std::mutex>;
 
+std::mutex solver_mutex;
+
 struct Session {
     struct Formulation {
         NlpFormulation nlp_formulation;
 
-        // options
-        double max_cpu_time{0};
-        int max_iter{0};
+        // Options
+        double max_cpu_time = 0;
+        int max_iter = 0;
     } formulation;
     std::mutex formulation_mutex;
 
@@ -133,22 +135,25 @@ void end_session(int session) {
     sessions.data[session] = nullptr;
 }
 
-void get_model_info(int session, ModelInfo* output) {
-    auto[formulation, lock]=get_formulation(session);
+void get_robot_model(int session, RobotModel* robot_model) {
+    auto[formulation, lock] = get_formulation(session);
     auto& f = formulation->nlp_formulation;
 
     using Eigen::Vector3d;
     using Eigen::Map;
 
-    Map<Vector3d>(output->max_deviation, 3) = f.model_.kinematic_model_->GetMaximumDeviationFromNominal();
+    Map<Vector3d>(robot_model->max_deviation, 3) = f.model_.kinematic_model_->GetMaximumDeviationFromNominal();
 
     auto nominal_stance = f.model_.kinematic_model_->GetNominalStanceInBase();
     for (int id = 0; id < f.model_.kinematic_model_->GetNumberOfEndeffectors(); ++id)
-        Map<Vector3d>(output->nominal_stance[id], 3) = nominal_stance[id];
+        Map<Vector3d>(robot_model->nominal_stance[id], 3) = nominal_stance[id];
+
+    robot_model->mass = f.model_.dynamic_model_->m();
+    robot_model->ee_count = f.model_.dynamic_model_->GetEECount();
 }
 
 int get_ee_count(int session) {
-    auto[formulation, lock]=get_formulation(session);
+    auto[formulation, lock] = get_formulation(session);
     return formulation->nlp_formulation.model_.dynamic_model_->GetEECount();
 }
 
@@ -176,10 +181,13 @@ void set_bound(int session, const Bound* bound) {
         f.initial_ee_W_.push_back(Map<const Vector3d>(bound->initial_ee_positions[id], 3));
 
     init_gait(*formulation, bound->duration, lock);
+}
 
-    formulation->max_cpu_time = bound->max_cpu_time;
-    formulation->max_iter = bound->max_iter;
-    if (bound->optimize_phase_durations) f.params_.OptimizePhaseDurations();
+void set_option(int session, const Option* option) {
+    auto[formulation, lock] = get_formulation(session);
+    formulation->max_cpu_time = option->max_cpu_time;
+    formulation->max_iter = option->max_iter;
+    if (option->optimize_phase_durations) formulation->nlp_formulation.params_.OptimizePhaseDurations();
 }
 
 SplineHolder async_optimize(int session) {
@@ -200,6 +208,8 @@ SplineHolder async_optimize(int session) {
     solver.SetOption("jacobian_approximation", "exact");
     if (formulation->max_iter > 0) solver.SetOption("max_iter", formulation->max_iter);
     if (formulation->max_cpu_time > 0) solver.SetOption("max_cpu_time", formulation->max_cpu_time);
+
+    lock = Lock(solver_mutex);
     solver.Solve(problem);
 
     return std::move(solution);
@@ -210,47 +220,49 @@ void start_optimization(int session) {
     *solution = std::async(std::launch::async, async_optimize, session);
 }
 
-bool update_solution(Session::Solution& solution, Lock&) {
-    if (std::holds_alternative<std::future<SplineHolder>>(solution)) {
-        auto& future = std::get<std::future<SplineHolder>>(solution);
-        if (!future.valid()) return false;
-        if (future.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
-            solution = future.get();
+bool update_solution(Session::Solution* solution, Lock&) {
+    if (auto future = std::get_if<std::future<SplineHolder>>(solution)) {
+        if (!future->valid()) return false;
+        if (future->wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+            *solution = future->get();
         else return false;
     }
     return true;
 }
 
-bool get_solution(int session, double time, State* output) {
+bool solution_ready(int session) {
     auto[solution, lock] = get_solution(session);
-    if (!update_solution(*solution, lock)) return false;
+
+    if (auto future = std::get_if<std::future<SplineHolder>>(solution))
+        if (!future->valid()) return true;
+
+    return update_solution(solution, lock);
+}
+
+bool get_solution_state(int session, double time, State* state) {
+    auto[solution, lock] = get_solution(session);
+    if (!update_solution(solution, lock)) return false;
     auto& current = std::get<SplineHolder>(*solution);
 
     using Eigen::Map;
     using Eigen::Vector3d;
 
     auto point = current.base_linear_->GetPoint(time);
-    Map<Vector3d>(output->base_linear_position, 3) = point.p();
-    Map<Vector3d>(output->base_linear_velocity, 3) = point.v();
+    Map<Vector3d>(state->base_linear_position, 3) = point.p();
+    Map<Vector3d>(state->base_linear_velocity, 3) = point.v();
 
     point = current.base_angular_->GetPoint(time);
-    Map<Vector3d>(output->base_angular_position, 3) = point.p();
-    Map<Vector3d>(output->base_angular_velocity, 3) = point.v();
+    Map<Vector3d>(state->base_angular_position, 3) = point.p();
+    Map<Vector3d>(state->base_angular_velocity, 3) = point.v();
 
     for (int id = 0; id < current.ee_motion_.size(); ++id)
-        Map<Vector3d>(output->ee_motions[id], 3) = current.ee_motion_[id]->GetPoint(time).p();
+        Map<Vector3d>(state->ee_motions[id], 3) = current.ee_motion_[id]->GetPoint(time).p();
 
     for (int id = 0; id < current.ee_force_.size(); ++id)
-        Map<Vector3d>(output->ee_forces[id], 3) = current.ee_force_[id]->GetPoint(time).p();
+        Map<Vector3d>(state->ee_forces[id], 3) = current.ee_force_[id]->GetPoint(time).p();
 
     for (int id = 0; id < current.phase_durations_.size(); ++id)
-        output->contacts[id] = current.phase_durations_[id]->IsContactPhase(time);
-
+        state->contacts[id] = current.phase_durations_[id]->IsContactPhase(time);
 
     return true;
-}
-
-bool solution_ready(int session) {
-    auto[solution, lock] = get_solution(session);
-    return update_solution(*solution, lock);
 }
