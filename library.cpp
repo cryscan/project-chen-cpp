@@ -126,7 +126,7 @@ int create_session(int model) {
 
     auto formulation = std::make_shared<Formulation>();
     formulation->nlp_formulation.model_ = static_cast<towr::RobotModel::Robot>(model);
-    formulation->nlp_formulation.terrain_ = towr::HeightMap::MakeTerrain(towr::HeightMap::FlatID);
+    formulation->nlp_formulation.terrain_ = towr::HeightMap::MakeTerrain(towr::HeightMap::BlockID);
 
     auto solution = std::make_shared<Solution>();
     auto index = iter - sessions.formulations.begin();
@@ -154,21 +154,21 @@ void end_session(int session) {
     sessions.solutions.at(session) = nullptr;
 }
 
-void get_robot_model(int session, RobotModel* robot_model) {
+void get_robot_model(int session, Model* model) {
     auto[formulation, lock] = get_formulation(session);
     auto& f = formulation->nlp_formulation;
 
     using Eigen::Vector3d;
     using Eigen::Map;
 
-    Map<Vector3d>(robot_model->max_deviation, 3) = f.model_.kinematic_model_->GetMaximumDeviationFromNominal();
+    Map<Vector3d>(model->max_deviation, 3) = f.model_.kinematic_model_->GetMaximumDeviationFromNominal();
 
     auto nominal_stance = f.model_.kinematic_model_->GetNominalStanceInBase();
     for (int id = 0; id < f.model_.kinematic_model_->GetNumberOfEndeffectors(); ++id)
-        Map<Vector3d>(robot_model->nominal_stance[id], 3) = nominal_stance.at(id);
+        Map<Vector3d>(model->nominal_stance[id], 3) = nominal_stance.at(id);
 
-    robot_model->mass = f.model_.dynamic_model_->m();
-    robot_model->ee_count = f.model_.dynamic_model_->GetEECount();
+    model->mass = f.model_.dynamic_model_->m();
+    model->ee_count = f.model_.dynamic_model_->GetEECount();
 }
 
 int get_ee_count(int session) {
@@ -176,7 +176,7 @@ int get_ee_count(int session) {
     return formulation->nlp_formulation.model_.dynamic_model_->GetEECount();
 }
 
-void set_bound(int session, const Bound* bound) {
+void set_params(int session, const Parameters* parameters) {
     auto[formulation, lock] = get_formulation(session);
     auto& f = formulation->nlp_formulation;
 
@@ -185,33 +185,33 @@ void set_bound(int session, const Bound* bound) {
     using towr::kPos;
     using towr::kVel;
 
-    f.initial_base_.lin.at(kPos) = Map<const Vector3d>(bound->initial_base_linear_position, 3);
-    f.initial_base_.lin.at(kVel) = Map<const Vector3d>(bound->initial_base_linear_velocity, 3);
-    f.initial_base_.ang.at(kPos) = Map<const Vector3d>(bound->initial_base_angular_position, 3);
-    f.initial_base_.ang.at(kVel) = Map<const Vector3d>(bound->initial_base_angular_velocity, 3);
+    f.initial_base_.lin.at(kPos) = Map<const Vector3d>(parameters->initial_base_lin_pos, 3);
+    f.initial_base_.lin.at(kVel) = Map<const Vector3d>(parameters->initial_base_lin_vel, 3);
+    f.initial_base_.ang.at(kPos) = Map<const Vector3d>(parameters->initial_base_ang_pos, 3);
+    f.initial_base_.ang.at(kVel) = Map<const Vector3d>(parameters->initial_base_ang_vel, 3);
 
-    f.final_base_.lin.at(kPos) = Map<const Vector3d>(bound->final_base_linear_position, 3);
-    f.final_base_.lin.at(kVel) = Map<const Vector3d>(bound->final_base_linear_velocity, 3);
-    f.final_base_.ang.at(kPos) = Map<const Vector3d>(bound->final_base_angular_position, 3);
-    f.final_base_.ang.at(kVel) = Map<const Vector3d>(bound->final_base_angular_velocity, 3);
+    f.final_base_.lin.at(kPos) = Map<const Vector3d>(parameters->final_base_lin_pos, 3);
+    f.final_base_.lin.at(kVel) = Map<const Vector3d>(parameters->final_base_lin_vel, 3);
+    f.final_base_.ang.at(kPos) = Map<const Vector3d>(parameters->final_base_ang_pos, 3);
+    f.final_base_.ang.at(kVel) = Map<const Vector3d>(parameters->final_base_ang_vel, 3);
 
     f.initial_ee_W_.clear();
     for (int id = 0; id < f.model_.dynamic_model_->GetEECount(); ++id)
-        f.initial_ee_W_.push_back(Map<const Vector3d>(bound->initial_ee_positions[id], 3));
+        f.initial_ee_W_.push_back(Map<const Vector3d>(parameters->initial_ee_pos[id], 3));
 
-    f.params_.bounds_final_lin_pos_ = convert_bound_dims(bound->bounds_final_linear_position);
-    f.params_.bounds_final_lin_vel_ = convert_bound_dims(bound->bounds_final_linear_velocity);
-    f.params_.bounds_final_ang_pos_ = convert_bound_dims(bound->bounds_final_angular_position);
-    f.params_.bounds_final_ang_vel_ = convert_bound_dims(bound->bounds_final_angular_velocity);
+    f.params_.bounds_final_lin_pos_ = convert_bound_dims(parameters->bounds_final_lin_pos);
+    f.params_.bounds_final_lin_vel_ = convert_bound_dims(parameters->bounds_final_lin_vel);
+    f.params_.bounds_final_ang_pos_ = convert_bound_dims(parameters->bounds_final_ang_pos);
+    f.params_.bounds_final_ang_vel_ = convert_bound_dims(parameters->bounds_final_ang_vel);
 
-    init_gait(*formulation, bound->duration, lock);
+    init_gait(*formulation, parameters->duration, lock);
 }
 
-void set_option(int session, const Option* option) {
+void set_options(int session, const Options* options) {
     auto[formulation, lock] = get_formulation(session);
-    formulation->max_cpu_time = option->max_cpu_time;
-    formulation->max_iter = option->max_iter;
-    if (option->optimize_phase_durations) formulation->nlp_formulation.params_.OptimizePhaseDurations();
+    formulation->max_cpu_time = options->max_cpu_time;
+    formulation->max_iter = options->max_iter;
+    if (options->optimize_phase_durations) formulation->nlp_formulation.params_.OptimizePhaseDurations();
 }
 
 SplineHolder async_optimize(int session) {
@@ -272,12 +272,12 @@ bool get_solution_state(int session, double time, State* state) {
     using Eigen::Vector3d;
 
     auto point = current.base_linear_->GetPoint(time);
-    Map<Vector3d>(state->base_linear_position, 3) = point.p();
-    Map<Vector3d>(state->base_linear_velocity, 3) = point.v();
+    Map<Vector3d>(state->base_lin_pos, 3) = point.p();
+    Map<Vector3d>(state->base_lin_vel, 3) = point.v();
 
     point = current.base_angular_->GetPoint(time);
-    Map<Vector3d>(state->base_angular_position, 3) = point.p();
-    Map<Vector3d>(state->base_angular_velocity, 3) = point.v();
+    Map<Vector3d>(state->base_ang_pos, 3) = point.p();
+    Map<Vector3d>(state->base_ang_vel, 3) = point.v();
 
     for (int id = 0; id < current.ee_motion_.size(); ++id)
         Map<Vector3d>(state->ee_motions[id], 3) = current.ee_motion_.at(id)->GetPoint(time).p();

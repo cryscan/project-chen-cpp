@@ -25,7 +25,7 @@ int main() {
     formulation.terrain_ = HeightMap::MakeTerrain(HeightMap::TerrainID::FlatID);
 
     // Kinematic limits and dynamic parameters of the hopper
-    formulation.model_ = RobotModel(RobotModel::Monoped);
+    formulation.model_ = RobotModel(RobotModel::Biped);
 
     // set the initial position of the hopper
     formulation.initial_base_.lin.at(kPos).z() = 0.5;
@@ -45,7 +45,7 @@ int main() {
     // formulation.params_.ee_in_contact_at_start_.push_back(true);
     int ee_count = formulation.model_.dynamic_model_->GetEECount();
     auto gait = GaitGenerator::MakeGaitGenerator(ee_count);
-    gait->SetCombo(GaitGenerator::Combos::C1);
+    gait->SetCombo(GaitGenerator::Combos::C0);
     for (int i = 0; i < ee_count; ++i) {
         formulation.params_.ee_phase_durations_.push_back(gait->GetPhaseDurations(2.0, i));
         formulation.params_.ee_in_contact_at_start_.push_back(gait->IsInContactAtStart(i));
