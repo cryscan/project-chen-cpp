@@ -14,11 +14,13 @@
 #include <Eigen/Core>
 
 #include <towr/nlp_formulation.h>
+#include <towr/costs/soft_constraint.h>
 #include <towr/terrain/examples/height_map_examples.h>
 #include <towr/initialization/gait_generator.h>
 #include <ifopt/ipopt_solver.h>
 
 #include "library.h"
+#include "path_constraint.h"
 
 
 using towr::NlpFormulation;
@@ -29,10 +31,19 @@ using Lock = std::unique_lock<std::mutex>;
 
 std::mutex solver_mutex;
 
+struct PathPoint {
+    double time;
+    Eigen::Vector3d linear;
+    Eigen::Vector3d angular;
+};
+
 struct Formulation {
     using Ptr = std::shared_ptr<Formulation>;
+    using PathPointVec = std::vector<PathPoint>;
 
     NlpFormulation nlp_formulation;
+    PathPointVec path_points;
+
     double max_cpu_time = 0;
     int max_iter = 0;
 
@@ -214,10 +225,35 @@ void set_options(int session, const Options* options) {
     if (options->optimize_phase_durations) formulation->nlp_formulation.params_.OptimizePhaseDurations();
 }
 
+auto build_path_constraint(const Formulation::PathPointVec& path_points,
+                           const SplineHolder& spline_holder) {
+    using Eigen::VectorXd;
+
+    std::vector<double> dts;
+    std::vector<VectorXd> path_linear, path_angular;
+
+    for (auto& path_point: path_points) {
+        dts.push_back(path_point.time);
+        path_linear.emplace_back(path_point.linear);
+        path_angular.emplace_back(path_point.angular);
+    }
+
+    if (!dts.empty())
+        for (auto iter = dts.end() - 1; iter != dts.begin(); --iter)
+            *iter -= *(iter - 1);
+
+    return std::make_shared<PathConstraint>(dts, path_linear, path_angular, spline_holder);
+}
+
 SplineHolder async_optimize(int session) {
+    using towr::SoftConstraint;
+    using ifopt::ConstraintSet;
+    using ifopt::Problem;
+    using ifopt::IpoptSolver;
+
     auto[formulation, lock] = get_formulation(session);
 
-    ifopt::Problem problem;
+    Problem problem;
     SplineHolder solution;
 
     auto& formulation_ = formulation->nlp_formulation;
@@ -228,7 +264,10 @@ SplineHolder async_optimize(int session) {
     for (auto& c: formulation_.GetCosts())
         problem.AddCostSet(c);
 
-    ifopt::IpoptSolver solver;
+    auto path_constraint = build_path_constraint(formulation->path_points, solution);
+    problem.AddConstraintSet(path_constraint);
+
+    IpoptSolver solver;
     solver.SetOption("jacobian_approximation", "exact");
     if (formulation->max_iter > 0) solver.SetOption("max_iter", formulation->max_iter);
     if (formulation->max_cpu_time > 0) solver.SetOption("max_cpu_time", formulation->max_cpu_time);
