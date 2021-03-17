@@ -31,18 +31,15 @@ using Lock = std::unique_lock<std::mutex>;
 
 std::mutex solver_mutex;
 
-struct PathPoint {
-    double time;
-    Eigen::Vector3d linear;
-    Eigen::Vector3d angular;
-};
-
 struct Formulation {
     using Ptr = std::shared_ptr<Formulation>;
     using PathPointVec = std::vector<PathPoint>;
 
     NlpFormulation nlp_formulation;
+    double duration = 0;
+
     PathPointVec path_points;
+    std::vector<GaitGenerator::Gaits> gaits;
 
     double max_cpu_time = 0;
     int max_iter = 0;
@@ -103,19 +100,20 @@ std::tuple<Solution::Ptr, Lock> get_solution(int session) {
     return std::make_tuple(solution, std::move(lock));
 }
 
-void init_gait(Formulation& formulation, double duration, Lock&) {
+void init_gait(Formulation& formulation, Lock&) {
     auto& f = formulation.nlp_formulation;
     auto ee_count = f.model_.dynamic_model_->GetEECount();
 
-    auto gait = GaitGenerator::MakeGaitGenerator(ee_count);
-    gait->SetCombo(GaitGenerator::C0);
+    auto generator = GaitGenerator::MakeGaitGenerator(ee_count);
+    if (formulation.gaits.empty()) generator->SetCombo(towr::GaitGenerator::C0);
+    else generator->SetGaits(formulation.gaits);
 
     f.params_.ee_phase_durations_.clear();
     f.params_.ee_in_contact_at_start_.clear();
 
     for (int id = 0; id < ee_count; ++id) {
-        f.params_.ee_phase_durations_.push_back(gait->GetPhaseDurations(duration, id));
-        f.params_.ee_in_contact_at_start_.push_back(gait->IsInContactAtStart(id));
+        f.params_.ee_phase_durations_.push_back(generator->GetPhaseDurations(formulation.duration, id));
+        f.params_.ee_in_contact_at_start_.push_back(generator->IsInContactAtStart(id));
     }
 }
 
@@ -137,7 +135,7 @@ int create_session(int model) {
 
     auto formulation = std::make_shared<Formulation>();
     formulation->nlp_formulation.model_ = static_cast<towr::RobotModel::Robot>(model);
-    formulation->nlp_formulation.terrain_ = towr::HeightMap::MakeTerrain(towr::HeightMap::BlockID);
+    formulation->nlp_formulation.terrain_ = towr::HeightMap::MakeTerrain(towr::HeightMap::FlatID);
 
     auto solution = std::make_shared<Solution>();
     auto index = iter - sessions.formulations.begin();
@@ -165,7 +163,7 @@ void end_session(int session) {
     sessions.solutions.at(session) = nullptr;
 }
 
-void get_robot_model(int session, Model* model) {
+void get_model(int session, Model* model) {
     auto[formulation, lock] = get_formulation(session);
     auto& f = formulation->nlp_formulation;
 
@@ -214,8 +212,6 @@ void set_params(int session, const Parameters* parameters) {
     f.params_.bounds_final_lin_vel_ = convert_bound_dims(parameters->bounds_final_lin_vel);
     f.params_.bounds_final_ang_pos_ = convert_bound_dims(parameters->bounds_final_ang_pos);
     f.params_.bounds_final_ang_vel_ = convert_bound_dims(parameters->bounds_final_ang_vel);
-
-    init_gait(*formulation, parameters->duration, lock);
 }
 
 void set_options(int session, const Options* options) {
@@ -225,22 +221,35 @@ void set_options(int session, const Options* options) {
     if (options->optimize_phase_durations) formulation->nlp_formulation.params_.OptimizePhaseDurations();
 }
 
+void set_duration(int session, double duration) {
+    auto[formulation, lock] = get_formulation(session);
+    formulation->duration = duration;
+}
+
+void push_path_point(int session, const PathPoint* path_point) {
+    auto[formulation, lock] = get_formulation(session);
+    formulation->path_points.push_back(*path_point);
+}
+
+void push_gait(int session, int gait) {
+    auto[formulation, lock] = get_formulation(session);
+    formulation->gaits.push_back(static_cast<GaitGenerator::Gaits>(gait));
+}
+
 auto build_path_constraint(const Formulation::PathPointVec& path_points,
                            const SplineHolder& spline_holder) {
     using Eigen::VectorXd;
+    using Eigen::Map;
 
     std::vector<double> dts;
     std::vector<VectorXd> path_linear, path_angular;
 
     for (auto& path_point: path_points) {
         dts.push_back(path_point.time);
-        path_linear.emplace_back(path_point.linear);
-        path_angular.emplace_back(path_point.angular);
-    }
 
-    if (!dts.empty())
-        for (auto iter = dts.end() - 1; iter != dts.begin(); --iter)
-            *iter -= *(iter - 1);
+        path_linear.emplace_back(Map<const VectorXd>(path_point.linear, 3));
+        path_angular.emplace_back(Map<const VectorXd>(path_point.angular, 3));
+    }
 
     return std::make_shared<PathConstraint>(dts, path_linear, path_angular, spline_holder);
 }
@@ -252,6 +261,8 @@ SplineHolder async_optimize(int session) {
     using ifopt::IpoptSolver;
 
     auto[formulation, lock] = get_formulation(session);
+
+    init_gait(*formulation, lock);
 
     Problem problem;
     SplineHolder solution;
@@ -295,10 +306,6 @@ bool update_solution(Solution& solution, Lock&) {
 
 bool solution_ready(int session) {
     auto[solution, lock] = get_solution(session);
-
-    if (auto future = std::get_if<std::future<SplineHolder>>(&solution->variant))
-        if (!future->valid()) return true;
-
     return update_solution(*solution, lock);
 }
 

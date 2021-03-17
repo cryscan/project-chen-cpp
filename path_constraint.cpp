@@ -29,7 +29,7 @@ PathConstraint::PathConstraint(const VecTimes& dts,
     node_bounds.resize(k6D);
     node_bounds.at(AX) = ifopt::NoBound;
     node_bounds.at(AY) = ifopt::NoBound;
-    node_bounds.at(AZ) = Bounds(-dev, dev);
+    node_bounds.at(AZ) = ifopt::NoBound;
     node_bounds.at(LX) = Bounds(-dev, dev);
     node_bounds.at(LY) = Bounds(-dev, dev);
     node_bounds.at(LZ) = ifopt::NoBound;

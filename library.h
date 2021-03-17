@@ -17,12 +17,10 @@ struct Model {
     int ee_count;
 };
 
-void get_robot_model(int session, Model* model);
+void get_model(int session, Model* model);
 int get_ee_count(int session);
 
 struct Parameters {
-    double duration;
-
     double initial_base_lin_pos[3];
     double initial_base_lin_vel[3];
     double initial_base_ang_pos[3];
@@ -49,6 +47,16 @@ struct Options {
 
 void set_params(int session, const Parameters* parameters);
 void set_options(int session, const Options* options);
+void set_duration(int session, double duration);
+
+struct PathPoint {
+    double time;
+    double linear[3];
+    double angular[3];
+};
+
+void push_path_point(int session, const PathPoint* path_point);
+void push_gait(int session, int gait);
 
 void start_optimization(int session);
 
