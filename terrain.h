@@ -5,27 +5,33 @@
 #ifndef PLAYGROUND_TERRAIN_H
 #define PLAYGROUND_TERRAIN_H
 
+#include <mutex>
 #include <towr/terrain/height_map.h>
+
+#include "spatial_hash.h"
 
 
 class Terrain : public towr::HeightMap {
 public:
+    using Ptr = std::shared_ptr<Terrain>;
     using Vector2i = Eigen::Vector2i;
     using Vector2d = Eigen::Vector2d;
-    using MatrixXd = Eigen::MatrixXd;
     using Dim3D = towr::Dim3D;
 
-    Terrain(Vector3d origin, int x, int y, double unit_size);
+    std::mutex mutex;
 
-    void SetHeight(int x, int y, double height);
+    Terrain(Vector3d pos, uint x, uint y, double unit_size);
+
+    void SetHeight(uint x, uint y, double height);
 
     [[nodiscard]] double GetHeight(double x, double y) const override;
     [[nodiscard]] double GetHeightDerivWrtX(double x, double y) const override;
     [[nodiscard]] double GetHeightDerivWrtY(double x, double y) const override;
 
 private:
-    Vector3d origin;
-    MatrixXd data;
+    Vector3d pos;
+    Vector2i size;
+    HilbertHash<double> data;
     double unit_size;
 
     /**

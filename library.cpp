@@ -9,18 +9,18 @@
 #include <memory>
 #include <future>
 #include <mutex>
-#include <exception>
+#include <stdexcept>
 
 #include <Eigen/Core>
 
 #include <towr/nlp_formulation.h>
-#include <towr/costs/soft_constraint.h>
 #include <towr/terrain/examples/height_map_examples.h>
 #include <towr/initialization/gait_generator.h>
 #include <ifopt/ipopt_solver.h>
 
 #include "library.h"
 #include "path_constraint.h"
+#include "terrain.h"
 
 
 using towr::NlpFormulation;
@@ -29,7 +29,10 @@ using towr::GaitGenerator;
 
 using Lock = std::unique_lock<std::mutex>;
 
-std::mutex solver_mutex;
+
+/* Sessions */
+
+static std::mutex solver_mutex;
 
 struct Formulation {
     using Ptr = std::shared_ptr<Formulation>;
@@ -54,34 +57,23 @@ struct Solution {
     std::mutex mutex;
 };
 
-struct InvalidSessionError : std::exception {
-    explicit InvalidSessionError(int session) : error() {
-        sprintf(error, "Invalid session %d", session);
-    }
-
-    [[nodiscard]] const char* what() const noexcept override {
-        return error;
-    }
-
-private:
-    char error[32];
-};
-
 struct {
     std::vector<Formulation::Ptr> formulations;
     std::vector<Solution::Ptr> solutions;
     std::mutex mutex;
 } static sessions;
 
+
 void check_session(int session, Lock&) {
-    if (session >= sessions.formulations.size() || sessions.formulations[session] == nullptr)
-        throw InvalidSessionError(session);
+    if (session >= sessions.formulations.size() || sessions.formulations.at(session) == nullptr) {
+        std::string error = "Invalid Session Id " + std::to_string(session);
+        throw std::runtime_error(error);
+    }
 }
 
 std::tuple<Formulation::Ptr, Lock> get_formulation(int session) {
     auto lock = Lock(sessions.mutex);
-    try { check_session(session, lock); }
-    catch (InvalidSessionError& error) { std::cerr << error.what() << std::endl; }
+    check_session(session, lock);
 
     auto formulation = sessions.formulations.at(session);
     Lock(formulation->mutex).swap(lock);
@@ -91,8 +83,7 @@ std::tuple<Formulation::Ptr, Lock> get_formulation(int session) {
 
 std::tuple<Solution::Ptr, Lock> get_solution(int session) {
     auto lock = Lock(sessions.mutex);
-    try { check_session(session, lock); }
-    catch (InvalidSessionError& error) { std::cerr << error.what() << std::endl; }
+    check_session(session, lock);
 
     auto solution = sessions.solutions.at(session);
     Lock(solution->mutex).swap(lock);
@@ -153,11 +144,7 @@ int create_session(int model) {
 
 void end_session(int session) {
     auto lock = std::unique_lock(sessions.mutex);
-    try { check_session(session, lock); }
-    catch (InvalidSessionError& error) {
-        std::cerr << error.what() << std::endl;
-        return;
-    }
+    check_session(session, lock);
 
     sessions.formulations.at(session) = nullptr;
     sessions.solutions.at(session) = nullptr;
@@ -255,7 +242,6 @@ auto build_path_constraint(const Formulation::PathPointVec& path_points,
 }
 
 SplineHolder async_optimize(int session) {
-    using towr::SoftConstraint;
     using ifopt::ConstraintSet;
     using ifopt::Problem;
     using ifopt::IpoptSolver;
@@ -335,4 +321,68 @@ bool get_solution_state(int session, double time, State* state) {
         state->contacts[id] = current.phase_durations_.at(id)->IsContactPhase(time);
 
     return true;
+}
+
+
+/* Terrains */
+
+struct {
+    std::vector<Terrain::Ptr> terrains;
+    std::mutex mutex;
+} static terrains;
+
+
+void check_terrain(int terrain, Lock&) {
+    if (terrain >= terrains.terrains.size() || terrains.terrains.at(terrain) == nullptr) {
+        std::string error = "Invalid Terrain Id " + std::to_string(terrain);
+        throw std::runtime_error(error);
+    }
+}
+
+std::tuple<Terrain::Ptr, Lock> get_terrain(int terrain) {
+    auto lock = Lock(terrains.mutex);
+    check_terrain(terrain, lock);
+
+    auto t = terrains.terrains.at(terrain);
+    Lock(t->mutex).swap(lock);
+
+    return std::make_tuple(t, std::move(lock));
+}
+
+int create_terrain(double pos_x, double pos_y, double pos_z, uint x, uint y, double unit_size) {
+    using Eigen::Vector3d;
+
+    auto lock = Lock(terrains.mutex);
+    auto iter = std::find(terrains.terrains.begin(), terrains.terrains.end(), nullptr);
+
+    Vector3d pos(pos_x, pos_y, pos_z);
+    auto terrain = std::make_shared<Terrain>(pos, x, y, unit_size);
+
+    if (iter != terrains.terrains.end()) *iter = std::move(terrain);
+    else terrains.terrains.push_back(std::move(terrain));
+
+    return iter - terrains.terrains.begin();
+}
+
+void end_terrain(int terrain) {
+    auto lock = Lock(terrains.mutex);
+    check_terrain(terrain, lock);
+
+    terrains.terrains.at(terrain) = nullptr;
+}
+
+void set_height(int terrain, uint x, uint y, double height) {
+    auto[t, lock] = get_terrain(terrain);
+    t->SetHeight(x, y, height);
+}
+
+double get_height(int terrain, double x, double y) {
+    auto[t, lock]  = get_terrain(terrain);
+    return t->GetHeight(x, y);
+}
+
+void get_height_derivatives(int terrain, double x, double y, double* dx, double* dy) {
+    auto[t, lock] = get_terrain(terrain);
+    *dx = t->GetHeightDerivWrtX(x, y);
+    *dy = t->GetHeightDerivWrtY(x, y);
 }

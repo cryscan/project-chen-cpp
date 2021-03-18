@@ -73,6 +73,13 @@ struct State {
 
 bool solution_ready(int session);
 bool get_solution_state(int session, double time, State* state);
+
+int create_terrain(double pos_x, double pos_y, double pos_z, uint x, uint y, double unit_size);
+void end_terrain(int terrain);
+
+void set_height(int terrain, uint x, uint y, double height);
+double get_height(int terrain, double x, double y);
+void get_height_derivatives(int terrain, double x, double y, double* dx, double* dy);
 }
 
 #endif //PLAYGROUND_LIBRARY_H

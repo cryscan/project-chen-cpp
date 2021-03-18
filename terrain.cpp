@@ -4,13 +4,14 @@
 
 #include "terrain.h"
 
-Terrain::Terrain(Vector3d origin, int x, int y, double unit_size)
-        : origin(std::move(origin)),
+Terrain::Terrain(Vector3d pos, uint x, uint y, double unit_size)
+        : pos(std::move(pos)),
+          size(x, y),
           unit_size(unit_size),
-          data(MatrixXd::Zero(x + 1, y + 1)) {
+          data(x + 1, y + 1) {
 }
 
-void Terrain::SetHeight(int x, int y, double height) {
+void Terrain::SetHeight(uint x, uint y, double height) {
     data(x, y) = height;
 }
 
@@ -62,20 +63,16 @@ double Terrain::BarycentricInterpolation(Vector3d p1, Vector3d p2, Vector3d p3, 
     return d_h_px * d_px_pos + d_h_py * d_py_pos;
 }
 
-double Terrain::GetValue(double x, double y, Terrain::Dim3D deriv) const {
-    auto in_range = [this](int x, int y) {
-        return x >= 0 && x + 1 < data.rows() && y >= 0 && y + 1 < data.cols();
-    };
-
-    x -= origin.x();
-    y -= origin.y();
+double Terrain::GetValue(double x, double y, Dim3D deriv) const {
+    x -= pos.x();
+    y -= pos.y();
 
     auto id_x = (int) (x / unit_size), id_y = (int) (y / unit_size);
-    if (!in_range(id_x, id_y)) return 0;
+    if (x < 0 || x >= size.x() || y < 0 || y >= size.y()) return 0;
 
-    Vector2d pos;
-    pos.x() = (x - id_x * unit_size) / unit_size;
-    pos.y() = (y - id_y * unit_size) / unit_size;
+    Vector2d p;
+    p.x() = (x - id_x * unit_size) / unit_size;
+    p.y() = (y - id_y * unit_size) / unit_size;
 
     Vector3d p1, p2, p3;
     if (x + y < 1) {
@@ -88,7 +85,7 @@ double Terrain::GetValue(double x, double y, Terrain::Dim3D deriv) const {
         p3 << 1, 1, data(id_x + 1, id_y + 1);
     }
 
-    auto result = BarycentricInterpolation(p1, p2, p3, pos, deriv);
+    auto result = BarycentricInterpolation(p1, p2, p3, p, deriv);
     if (deriv != Dim3D::Z) result /= unit_size;
     return result;
 }
