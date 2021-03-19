@@ -362,10 +362,11 @@ int create_terrain(double pos_x, double pos_y, double pos_z, uint x, uint y, dou
     Vector3d pos(pos_x, pos_y, pos_z);
     auto terrain = std::make_shared<Terrain>(pos, x, y, unit_size);
 
+    auto index = iter - terrains.terrains.begin();
     if (iter != terrains.terrains.end()) *iter = std::move(terrain);
     else terrains.terrains.push_back(std::move(terrain));
 
-    return iter - terrains.terrains.begin();
+    return index;
 }
 
 void end_terrain(int terrain) {
