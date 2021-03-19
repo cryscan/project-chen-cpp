@@ -28,8 +28,8 @@ using towr::SplineHolder;
 using towr::GaitGenerator;
 
 using Lock = std::unique_lock<std::mutex>;
-using SharedLock = std::shared_lock<std::shared_mutex>;
-using UniqueLock = std::unique_lock<std::shared_mutex>;
+
+Terrain::Ptr get_terrain(int terrain);
 
 
 /* Sessions */
@@ -172,6 +172,11 @@ void get_model(int session, Model* model) {
 int get_ee_count(int session) {
     auto[formulation, lock] = get_formulation(session);
     return formulation->nlp_formulation.model_.dynamic_model_->GetEECount();
+}
+
+void set_terrain(int session, int terrain) {
+    auto[formulation, lock]  = get_formulation(session);
+    formulation->nlp_formulation.terrain_ = get_terrain(terrain);
 }
 
 void set_params(int session, const Parameters* parameters) {
@@ -342,15 +347,10 @@ void check_terrain(int terrain, L&) {
     }
 }
 
-template<typename L>
-std::tuple<Terrain::Ptr, L> get_terrain(int terrain) {
+Terrain::Ptr get_terrain(int terrain) {
     auto lock = Lock(terrains.mutex);
     check_terrain(terrain, lock);
-
-    auto t = terrains.terrains.at(terrain);
-    auto lock_ = L(t->mutex);
-
-    return std::make_tuple(t, std::move(lock_));
+    return terrains.terrains.at(terrain);
 }
 
 int create_terrain(double pos_x, double pos_y, double pos_z, uint x, uint y, double unit_size) {
@@ -372,22 +372,18 @@ int create_terrain(double pos_x, double pos_y, double pos_z, uint x, uint y, dou
 void end_terrain(int terrain) {
     auto lock = Lock(terrains.mutex);
     check_terrain(terrain, lock);
-
     terrains.terrains.at(terrain) = nullptr;
 }
 
 void set_height(int terrain, uint x, uint y, double height) {
-    auto[t, lock] = get_terrain<UniqueLock>(terrain);
-    t->SetHeight(x, y, height);
+    get_terrain(terrain)->SetHeight(x, y, height);
 }
 
 double get_height(int terrain, double x, double y) {
-    auto[t, lock]  = get_terrain<SharedLock>(terrain);
-    return t->GetHeight(x, y);
+    return get_terrain(terrain)->GetHeight(x, y);
 }
 
 void get_height_derivatives(int terrain, double x, double y, double* dx, double* dy) {
-    auto[t, lock] = get_terrain<SharedLock>(terrain);
-    *dx = t->GetHeightDerivWrtX(x, y);
-    *dy = t->GetHeightDerivWrtY(x, y);
+    *dx = get_terrain(terrain)->GetHeightDerivWrtX(x, y);
+    *dy = get_terrain(terrain)->GetHeightDerivWrtY(x, y);
 }

@@ -45,6 +45,7 @@ struct Options {
     bool optimize_phase_durations;
 };
 
+void set_terrain(int session, int terrain);
 void set_params(int session, const Parameters* parameters);
 void set_options(int session, const Options* options);
 void set_duration(int session, double duration);

@@ -18,8 +18,6 @@ public:
     using Vector2d = Eigen::Vector2d;
     using Dim3D = towr::Dim3D;
 
-    std::shared_mutex mutex;
-
     Terrain(Vector3d pos, uint x, uint y, double unit_size);
 
     void SetHeight(uint x, uint y, double height);
@@ -31,8 +29,11 @@ public:
 private:
     Vector3d pos;
     Vector2i size;
-    HilbertHash<double> data;
     double unit_size;
+
+    HilbertHash<double> data;
+
+    mutable std::shared_mutex mutex;
 
     /**
      * @brief performs barycentric interpolation given the three vertices of a triangle and a planar coordinate.

@@ -4,6 +4,10 @@
 
 #include "terrain.h"
 
+
+using SharedLock = std::shared_lock<std::shared_mutex>;
+using UniqueLock = std::unique_lock<std::shared_mutex>;
+
 Terrain::Terrain(Vector3d pos, uint x, uint y, double unit_size)
         : pos(std::move(pos)),
           size(x, y),
@@ -12,6 +16,7 @@ Terrain::Terrain(Vector3d pos, uint x, uint y, double unit_size)
 }
 
 void Terrain::SetHeight(uint x, uint y, double height) {
+    auto lock = UniqueLock(mutex);
     data(x, y) = height;
 }
 
@@ -64,6 +69,8 @@ double Terrain::BarycentricInterpolation(Vector3d p1, Vector3d p2, Vector3d p3, 
 }
 
 double Terrain::GetValue(double x, double y, Dim3D deriv) const {
+    auto lock = SharedLock(mutex);
+
     x -= pos.x();
     y -= pos.y();
 
