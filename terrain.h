@@ -5,7 +5,7 @@
 #ifndef PLAYGROUND_TERRAIN_H
 #define PLAYGROUND_TERRAIN_H
 
-#include <mutex>
+#include <shared_mutex>
 #include <towr/terrain/height_map.h>
 
 #include "spatial_hash.h"
@@ -18,7 +18,7 @@ public:
     using Vector2d = Eigen::Vector2d;
     using Dim3D = towr::Dim3D;
 
-    std::mutex mutex;
+    std::shared_mutex mutex;
 
     Terrain(Vector3d pos, uint x, uint y, double unit_size);
 

@@ -2,13 +2,13 @@
 // Created by cryscan on 2/26/21.
 //
 
-#include <iostream>
 #include <vector>
 #include <bitset>
 #include <variant>
 #include <memory>
 #include <future>
 #include <mutex>
+#include <shared_mutex>
 #include <stdexcept>
 
 #include <Eigen/Core>
@@ -28,6 +28,8 @@ using towr::SplineHolder;
 using towr::GaitGenerator;
 
 using Lock = std::unique_lock<std::mutex>;
+using SharedLock = std::shared_lock<std::shared_mutex>;
+using UniqueLock = std::unique_lock<std::shared_mutex>;
 
 
 /* Sessions */
@@ -332,21 +334,23 @@ struct {
 } static terrains;
 
 
-void check_terrain(int terrain, Lock&) {
+template<typename L>
+void check_terrain(int terrain, L&) {
     if (terrain >= terrains.terrains.size() || terrains.terrains.at(terrain) == nullptr) {
         std::string error = "Invalid Terrain Id " + std::to_string(terrain);
         throw std::runtime_error(error);
     }
 }
 
-std::tuple<Terrain::Ptr, Lock> get_terrain(int terrain) {
+template<typename L>
+std::tuple<Terrain::Ptr, L> get_terrain(int terrain) {
     auto lock = Lock(terrains.mutex);
     check_terrain(terrain, lock);
 
     auto t = terrains.terrains.at(terrain);
-    Lock(t->mutex).swap(lock);
+    auto lock_ = L(t->mutex);
 
-    return std::make_tuple(t, std::move(lock));
+    return std::make_tuple(t, std::move(lock_));
 }
 
 int create_terrain(double pos_x, double pos_y, double pos_z, uint x, uint y, double unit_size) {
@@ -372,17 +376,17 @@ void end_terrain(int terrain) {
 }
 
 void set_height(int terrain, uint x, uint y, double height) {
-    auto[t, lock] = get_terrain(terrain);
+    auto[t, lock] = get_terrain<UniqueLock>(terrain);
     t->SetHeight(x, y, height);
 }
 
 double get_height(int terrain, double x, double y) {
-    auto[t, lock]  = get_terrain(terrain);
+    auto[t, lock]  = get_terrain<SharedLock>(terrain);
     return t->GetHeight(x, y);
 }
 
 void get_height_derivatives(int terrain, double x, double y, double* dx, double* dy) {
-    auto[t, lock] = get_terrain(terrain);
+    auto[t, lock] = get_terrain<SharedLock>(terrain);
     *dx = t->GetHeightDerivWrtX(x, y);
     *dy = t->GetHeightDerivWrtY(x, y);
 }
