@@ -16,6 +16,7 @@ public:
     using Ptr = std::shared_ptr<Terrain>;
     using Vector2i = Eigen::Vector2i;
     using Vector2d = Eigen::Vector2d;
+    using MatrixXd = Eigen::MatrixXd;
     using Dim3D = towr::Dim3D;
 
     Terrain(Vector3d pos, uint x, uint y, double unit_size);
@@ -31,7 +32,7 @@ private:
     Vector2i size;
     double unit_size;
 
-    HilbertHash<double> data;
+    MatrixXd data;
 
     mutable std::shared_mutex mutex;
 

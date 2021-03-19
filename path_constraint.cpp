@@ -25,14 +25,13 @@ PathConstraint::PathConstraint(const VecTimes& dts,
     base_linear = spline_holder.base_linear_;
     base_angular = spline_holder.base_angular_;
 
-    double dev = 0.05;
     node_bounds.resize(k6D);
     node_bounds.at(AX) = ifopt::NoBound;
     node_bounds.at(AY) = ifopt::NoBound;
     node_bounds.at(AZ) = ifopt::NoBound;
-    node_bounds.at(LX) = Bounds(-dev, dev);
-    node_bounds.at(LY) = Bounds(-dev, dev);
-    node_bounds.at(LZ) = ifopt::NoBound;
+    node_bounds.at(LX) = Bounds(-0.2, 0.2);
+    node_bounds.at(LY) = Bounds(-0.2, 0.2);
+    node_bounds.at(LZ) = Bounds(-1, 1);
 
     int n_constraints_per_node = node_bounds.size();
     SetRows(GetNumberOfNodes() * n_constraints_per_node);

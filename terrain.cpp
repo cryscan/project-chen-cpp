@@ -13,6 +13,7 @@ Terrain::Terrain(Vector3d pos, uint x, uint y, double unit_size)
           size(x, y),
           unit_size(unit_size),
           data(x + 1, y + 1) {
+    friction_coeff_ = 1.0;
 }
 
 void Terrain::SetHeight(uint x, uint y, double height) {
