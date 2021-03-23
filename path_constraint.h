@@ -11,13 +11,16 @@
 class PathConstraint : public towr::TimeDiscretizationConstraint {
 public:
     PathConstraint(const VecTimes& dts,
-                   const std::vector<VectorXd>& path_linear,
-                   const std::vector<VectorXd>& path_angular,
+                   std::vector<VectorXd> path_linear,
+                   std::vector<VectorXd> path_angular,
+                   std::vector<uint8_t> path_bounds,
                    const towr::SplineHolder& spline_holder);
 
 private:
     std::vector<VectorXd> path_linear;
     std::vector<VectorXd> path_angular;
+    std::vector<uint8_t> path_bounds;
+
     VecBound node_bounds;
 
     towr::NodeSpline::Ptr base_linear;
@@ -27,7 +30,7 @@ private:
     void UpdateBoundsAtInstance(double t, int k, VecBound&) const override;
     void UpdateJacobianAtInstance(double t, int k, std::string, Jacobian&) const override;
 
-    [[nodiscard]] int GetRow(int node, int dim) const;
+    [[nodiscard]] static int GetRow(int node, int dim);
 };
 
 #endif //PLAYGROUND_PATH_CONSTRAINT_H

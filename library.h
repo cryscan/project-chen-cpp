@@ -51,9 +51,10 @@ void set_options(int session, const Options* options);
 void set_duration(int session, double duration);
 
 struct PathPoint {
-    double time;
-    double linear[3];
-    double angular[3];
+    double time = 0;
+    double linear[3] = {0};
+    double angular[3] = {0};
+    uint8_t bounds = 0x1c;
 };
 
 void push_path_point(int session, const PathPoint* path_point);

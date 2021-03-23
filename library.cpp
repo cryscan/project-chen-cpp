@@ -8,7 +8,6 @@
 #include <memory>
 #include <future>
 #include <mutex>
-#include <shared_mutex>
 #include <stdexcept>
 
 #include <Eigen/Core>
@@ -19,6 +18,7 @@
 #include <ifopt/ipopt_solver.h>
 
 #include "library.h"
+#include "utils.h"
 #include "path_constraint.h"
 #include "terrain.h"
 
@@ -108,18 +108,6 @@ void init_gait(Formulation& formulation, Lock&) {
         f.params_.ee_phase_durations_.push_back(generator->GetPhaseDurations(formulation.duration, id));
         f.params_.ee_in_contact_at_start_.push_back(generator->IsInContactAtStart(id));
     }
-}
-
-std::vector<int> convert_bound_dims(uint8_t bounds) {
-    using towr::Dim3D::X;
-    using towr::Dim3D::Y;
-    using towr::Dim3D::Z;
-
-    auto bitset = std::bitset<3>(bounds);
-    std::vector<int> result;
-    for (auto dim: {X, Y, Z})
-        if (bitset[dim]) result.push_back(dim);
-    return result;
 }
 
 int create_session(int model) {
@@ -237,15 +225,16 @@ auto build_path_constraint(const Formulation::PathPointVec& path_points,
 
     std::vector<double> dts;
     std::vector<VectorXd> path_linear, path_angular;
+    std::vector<uint8_t> path_bounds;
 
     for (auto& path_point: path_points) {
         dts.push_back(path_point.time);
-
         path_linear.emplace_back(Map<const VectorXd>(path_point.linear, 3));
         path_angular.emplace_back(Map<const VectorXd>(path_point.angular, 3));
+        path_bounds.push_back(path_point.bounds);
     }
 
-    return std::make_shared<PathConstraint>(dts, path_linear, path_angular, spline_holder);
+    return std::make_shared<PathConstraint>(dts, path_linear, path_angular, path_bounds, spline_holder);
 }
 
 SplineHolder async_optimize(int session) {
@@ -339,8 +328,7 @@ struct {
 } static terrains;
 
 
-template<typename L>
-void check_terrain(int terrain, L&) {
+void check_terrain(int terrain, Lock&) {
     if (terrain >= terrains.terrains.size() || terrains.terrains.at(terrain) == nullptr) {
         std::string error = "Invalid Terrain Id " + std::to_string(terrain);
         throw std::runtime_error(error);

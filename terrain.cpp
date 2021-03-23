@@ -45,14 +45,7 @@ double Terrain::BarycentricInterpolation(Vector3d p1, Vector3d p2, Vector3d p3, 
     auto v31 = p1 - p3, v32 = p2 - p3;
     auto det = v31.x() * v32.y() - v32.x() * v31.y();
 
-    Vector3d p;
-    p.x() = (pos.x() * v32.y() - v32.x() * pos.y()) / det;
-    p.y() = (v31.x() * pos.y() - pos.x() * v31.y()) / det;
-    p.z() = 1.0 - p.x() - p.y();
-
-    auto d_h_px = v31.z(), d_h_py = v32.z();
     double d_px_pos, d_py_pos;
-
     switch (deriv) {
         case X:
             d_px_pos = v32.y() / det;
@@ -63,9 +56,14 @@ double Terrain::BarycentricInterpolation(Vector3d p1, Vector3d p2, Vector3d p3, 
             d_py_pos = v31.x() / det;
             break;
         case Z:
+            Vector3d p;
+            p.x() = (pos.x() * v32.y() - v32.x() * pos.y()) / det;
+            p.y() = (v31.x() * pos.y() - pos.x() * v31.y()) / det;
+            p.z() = 1.0 - p.x() - p.y();
             return p.x() * p1.z() + p.y() * p2.z() + p.z() * p3.z();
     }
 
+    auto d_h_px = v31.z(), d_h_py = v32.z();
     return d_h_px * d_px_pos + d_h_py * d_py_pos;
 }
 
