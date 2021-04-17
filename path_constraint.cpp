@@ -5,6 +5,7 @@
 #include <iostream>
 #include <cassert>
 #include <bitset>
+#include <utility>
 
 #include <towr/nlp_formulation.h>
 #include <towr/variables/variable_names.h>
@@ -16,13 +17,13 @@
 using namespace towr;
 
 PathConstraint::PathConstraint(const VecTimes& dts,
-                               std::vector<VectorXd> path_linear,
-                               std::vector<VectorXd> path_angular,
+                               const std::vector<VectorXd>& path_linear,
+                               const std::vector<VectorXd>& path_angular,
                                std::vector<uint8_t> path_bounds,
                                const SplineHolder& spline_holder)
         : TimeDiscretizationConstraint(dts, "path"),
-          path_linear(std::move(path_linear)),
-          path_angular(std::move(path_angular)),
+          path_linear(path_linear),
+          path_angular(path_angular),
           path_bounds(std::move(path_bounds)) {
     assert(dts.size() == path_linear.size());
     assert(dts.size() == path_angular.size());

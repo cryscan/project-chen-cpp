@@ -11,8 +11,8 @@
 class PathConstraint : public towr::TimeDiscretizationConstraint {
 public:
     PathConstraint(const VecTimes& dts,
-                   std::vector<VectorXd> path_linear,
-                   std::vector<VectorXd> path_angular,
+                   const std::vector<VectorXd>& path_linear,
+                   const std::vector<VectorXd>& path_angular,
                    std::vector<uint8_t> path_bounds,
                    const towr::SplineHolder& spline_holder);
 

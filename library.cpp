@@ -9,6 +9,7 @@
 #include <future>
 #include <mutex>
 #include <stdexcept>
+#include <iostream>
 
 #include <Eigen/Core>
 
